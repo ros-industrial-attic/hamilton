@@ -12,7 +12,9 @@
 #include <visualization_msgs/MarkerArray.h>
 #include <eigen_conversions/eigen_msg.h>
 #include <ur5_demo_descartes/ur5_robot_model.h>
+#include <pluginlib/class_loader.h>
 
+//TODO namespace anon vs named
 namespace 
 {
 const std::string ROBOT_DESCRIPTION_PARAM = "robot_description";
@@ -30,7 +32,10 @@ typedef std::vector<descartes_core::TrajectoryPtPtr> descartes_trajectory;
 typedef trajectory_msgs::JointTrajectory moveit_joint_traj;
 typedef descartes_trajectory::CartTrajectoryPt descartes_cart_pt;
 typedef descartes_trajectory::CartTrajectoryPt::AxialSymmetricPt descartes_cart_ax_sym_pt;
-typeder descartes_trajectory::JointTrajectoryPt descartes_joint_traj_pt;
+typedef descartes_trajectory::JointTrajectoryPt descartes_joint_traj_pt;
+typedef moveit_msgs::RobotTrajectory moveit_robot_traj;
+typedef moveit_msgs::RobotTrajectory::joint_trajectory moveit_joint_traj;
+// typedef trajectory_msgs::JointTrajectory moveit_joint_traj;
 // typedef descartes_core::RobotModelPtr descartes_robot_model_ptr;
 
 
@@ -51,6 +56,9 @@ struct HybridConfiguration
 
   /* Trajectory Generation Members:
    *  Used to control the attributes (points, shape, size, etc) of the robot trajectory. */
+
+  //TODO add support for straight lines, circle, B-splines. add to list. 
+
   double time_delay;              /* Time step between consecutive points in the robot path */
   std::vector<double> seed_pose;  /* Joint values close to the desired start of the robot path */
 
@@ -87,9 +95,20 @@ protected:
   bool appendDescartesCartPoint();
   bool appendDescartesJointPoint();
   bool appendDescartesTrajectorySegment();
+  bool appendFreeSpacePoint();
+  bool appendFreeSpaceCartPoint();
+  bool appendFreeSpaceJointPoint();
+
+  /* Create an axial trajectory pt from a given tf transform */
+  descartes_core::TrajectoryPtPtr tfToAxialTrajectoryPt(const tf::Transform& nominal, double discretization);   
+
+  /*Translates a point relative to a reference pose to an absolute transformation
+  Also flips the z axis of the orientation to point INTO the plane specified by the
+  reference frame.*/
+  tf::Transform createNominalTransform(const geometry_msgs::Pose& ref_pose, const geometry_msgs::Point& point)
 
   void fromDescartesToMoveitTrajectory(const DescartesTrajectory& in_traj,
-                                              trajectory_msgs::JointTrajectory& out_traj);
+                                              moveit_joint_traj& out_traj);
 
   void publishPosesMarkers(const EigenSTL::vector_Affine3d& poses);
 
@@ -112,7 +131,8 @@ protected:
   /* Application Descartes Constructs
    *  Components accessing the path planning capabilities in the Descartes library
    */
-
+  DescartesTrajectory& descartes_traj; /* Maintains the semi-constrained points and segments*/
+  moveit_msgs::RobotTrajectory
   descartes_core::RobotModelPtr descartes_robot_model_ptr_; /* Performs tasks specific to the Robot
                                                      such IK, FK and collision detection*/
   descartes_planner::SparsePlanner sparse_planner_;      /* Plans a smooth robot path given a trajectory of points */
