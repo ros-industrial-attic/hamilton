@@ -131,8 +131,8 @@ protected:
   /* Application Descartes Constructs
    *  Components accessing the path planning capabilities in the Descartes library
    */
-  DescartesTrajectory& descartes_traj; /* Maintains the semi-constrained points and segments*/
-  moveit_msgs::RobotTrajectory
+  descartes_trajectory& descartes_traj_; /* Maintains the semi-constrained points and segments*/
+  //moveit_msgs::RobotTrajectory 
   descartes_core::RobotModelPtr descartes_robot_model_ptr_; /* Performs tasks specific to the Robot
                                                      such IK, FK and collision detection*/
   descartes_planner::SparsePlanner sparse_planner_;      /* Plans a smooth robot path given a trajectory of points */
