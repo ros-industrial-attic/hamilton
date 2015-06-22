@@ -29,12 +29,12 @@ const std::string PLANNER_ID = "RRTConnectkConfigDefault";
 const std::string HOME_POSITION_NAME = "home";
 
 typedef std::vector<descartes_core::TrajectoryPtPtr> descartes_trajectory;
-typedef trajectory_msgs::JointTrajectory moveit_joint_traj;
 typedef descartes_trajectory::CartTrajectoryPt descartes_cart_pt;
 typedef descartes_trajectory::CartTrajectoryPt::AxialSymmetricPt descartes_cart_ax_sym_pt;
 typedef descartes_trajectory::JointTrajectoryPt descartes_joint_traj_pt;
 typedef moveit_msgs::RobotTrajectory moveit_robot_traj;
-typedef moveit_msgs::RobotTrajectory::joint_trajectory moveit_joint_traj;
+typedef trajectory_msgs::JointTrajectory moveit_joint_traj;
+// typedef moveit_msgs::RobotTrajectory::joint_trajectory moveit_joint_traj;
 // typedef trajectory_msgs::JointTrajectory moveit_joint_traj;
 // typedef descartes_core::RobotModelPtr descartes_robot_model_ptr;
 
@@ -118,7 +118,7 @@ protected:
   /* Application Data
    *  Holds the data used by the various functions in the application.
    */
-  DemoConfiguration config_;
+  HybridConfiguration config_;
 
   /* Application ROS Constructs
    *  Components needed to successfully run a ros-node and perform other important
@@ -137,6 +137,7 @@ protected:
                                                      such IK, FK and collision detection*/
   descartes_planner::SparsePlanner sparse_planner_;      /* Plans a smooth robot path given a trajectory of points */
   descartes_planner::DensePlanner dense_planner_;
+  moveit_msgs::RobotTrajectory moveit_trajectory_;
 };
 
 } /* namespace */

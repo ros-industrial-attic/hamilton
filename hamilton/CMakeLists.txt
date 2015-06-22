@@ -27,7 +27,7 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 )
 
- add_executable(${PROJECT_NAME}_trial src/trial.cpp)
+ add_executable(${PROJECT_NAME}_trial src/hybrid_planner.cpp)
 
  target_link_libraries(${PROJECT_NAME}_trial
    ${catkin_LIBRARIES}
