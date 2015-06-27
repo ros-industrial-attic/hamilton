@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 2.8.3)
 project(hamilton)
 
 ## Find catkin macros and libraries
-## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
-## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
@@ -24,31 +22,25 @@ catkin_package()
 ###########
 
 include_directories(
+  include 
   ${catkin_INCLUDE_DIRS}
+  ${Boost_INCLUDE_DIRS}
+  ${Eigen_INCLUDE_DIRS}
+
 )
 
- add_executable(${PROJECT_NAME}_trial src/hybrid_planner.cpp)
+#add_library(${PROJECT_NAME} src/hybrid_planner.cpp)
 
- target_link_libraries(${PROJECT_NAME}_trial
-   ${catkin_LIBRARIES}
- )
+add_executable(${PROJECT_NAME}_demo src/hybrid_planner.cpp)
 
-set_target_properties(${PROJECT_NAME}_trial
-  PROPERTIES OUTPUT_NAME trial
-  PREFIX "")
+target_link_libraries(${PROJECT_NAME}_demo ${catkin_LIBRARIES})
+
+#set_target_properties(${PROJECT_NAME}
+#  PROPERTIES OUTPUT_NAME 
+#  PREFIX "")
 
 
 #############
 ## Install ##
 #############
 
-install(TARGETS ${PROJECT_NAME}_trial
-  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
-
-install(DIRECTORY include/${PROJECT_NAME}/
-  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-  FILES_MATCHING PATTERN "*.h"
-)
