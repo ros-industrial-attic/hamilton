@@ -2,8 +2,12 @@
 #define HYBRID_PLANNER_H
 
 #include <ros/ros.h>
-#include <moveit_msgs/ExecuteKnownTrajectory.h>
+#include <boost/function.hpp>
+#include <boost/assign/list_of.hpp>
 #include <moveit/move_group_interface/move_group.h>
+#include <moveit/robot_trajectory/robot_trajectory.h>
+#include <moveit/robot_model_loader/robot_model_loader.h>
+#include <moveit/robot_state/conversions.h>
 #include <descartes_trajectory/axial_symmetric_pt.h>
 #include <descartes_trajectory/cart_trajectory_pt.h>
 #include <descartes_trajectory/joint_trajectory_pt.h>
@@ -14,12 +18,14 @@
 // #include <ur5_demo_descartes/ur5_robot_model.h>
 #include <pluginlib/class_loader.h>
 #include <descartes_moveit/moveit_state_adapter.h>
+#include <geometry_msgs/PoseArray.h>
 //TODO instead of specifying traj, planner and their subtypes explicitly -> find a simpler way
 
 
 //TODO namespace anon vs named
 namespace hamilton
 {
+//TODO TOCHECK ros params vs protected variables (vs partially hard coded)
 const std::string ROBOT_DESCRIPTION_PARAM = "robot_description";
 const std::string EXECUTE_TRAJECTORY_SERVICE = "execute_kinematic_path";
 const std::string VISUALIZE_TRAJECTORY_TOPIC = "visualize_trajectory_curve";
@@ -30,6 +36,7 @@ const double AXIS_LINE_LENGHT = 0.01;
 const double AXIS_LINE_WIDTH = 0.001;
 const std::string PLANNER_ID = "RRTConnectkConfigDefault";
 const std::string HOME_POSITION_NAME = "home";
+//TOCHECK config_ members or hardcoded MoveIt! params
 
 typedef std::vector<descartes_core::TrajectoryPtPtr> descartes_traj;
 typedef descartes_trajectory::CartTrajectoryPt descartes_cart_pt;
@@ -37,6 +44,7 @@ typedef descartes_trajectory::CartTrajectoryPt descartes_cart_pt;
 typedef descartes_trajectory::JointTrajectoryPt descartes_joint_traj_pt;
 typedef moveit_msgs::RobotTrajectory moveit_robot_traj;
 typedef trajectory_msgs::JointTrajectory moveit_joint_traj;
+// typedef boost::shared_ptr<move_group_interface::MoveGroup> MoveGroupPtr;
 // typedef moveit_msgs::RobotTrajectory::joint_trajectory moveit_joint_traj;
 // typedef trajectory_msgs::JointTrajectory moveit_joint_traj;
 // typedef descartes_core::RobotModelPtr descartes_robot_model_ptr;
@@ -49,6 +57,14 @@ typedef trajectory_msgs::JointTrajectory moveit_joint_traj;
  * from data found in the ros parameter server at runtime.
  *
  */
+
+ //TODO TOCHECK HybridConfiguration should be broken into three structs:
+ // - MoveIt! params
+ // - Descartes params
+ // - Common or global params
+
+ //Params should be entered from GUI. Adapt Fermi for this?
+
 struct HybridConfiguration
 {
   std::string group_name;                 /* Name of the manipulation group containing the relevant links in the robot */
@@ -69,6 +85,15 @@ struct HybridConfiguration
    * Used to control the attributes of the visualization artifacts
    */
   double min_point_distance;      /* Minimum distance between consecutive trajectory points. */
+
+  //MoveIt! params
+  const double plan_time; //planning time of MoveIt!
+  const double step_size; 
+  const double jump_thresh;
+  const bool moveit_replan;
+  const bool avoid_collision;
+
+  const bool descartes_replan; //TOCHECK 
 };
 
 
@@ -79,70 +104,85 @@ struct HybridConfiguration
 
 class HybridPlanner
 {
-public:
+  public:
 
-  HybridPlanner();
-  virtual ~HybridPlanner();
+    HybridPlanner();
+    virtual ~HybridPlanner();
 
-  void loadParameters();
-  void init();
-  void initRos();
-  void initDescartes();
-  void moveHome();
-  void generateTrajectory(descartes_traj& traj);
-  void planPath(descartes_traj& input_traj,descartes_traj& output_path);
-  void runPath(const descartes_traj& path);
+    void loadParameters();
+    void init();
+    void update();
+    // void initRos();
+    // void initDescartes();
+    void moveHome();
+    void generateTrajectory(descartes_traj& traj);
+    void planPath(descartes_traj& input_traj,descartes_traj& output_path);
+    void runPath(const descartes_traj& path);
 
-protected:
-  // TOCHECK bool vs void. 
-  bool appendDescartesPoint();
-  bool appendDescartesCartPoint(Eigen::Affine3d& pose);
-  bool appendDescartesJointPoint();
-  bool appendDescartesTrajectorySegment();
-  bool appendFreeSpacePoint();
-  bool appendFreeSpaceCartPoint();
-  bool appendFreeSpaceJointPoint();
-  // void HybridPlanner::appendDescartesCartPoint(EigenSTL::vector_Affine3d& pose);
+  protected:
+    // TOCHECK bool vs void. 
+    bool appendDescartesPoint();
+    bool appendDescartesCartPoint(Eigen::Affine3d& pose);
+    bool appendTolerancedDescartesCartPoint(Eigen::Affine3d& pose);
+    bool appendDescartesCartPointSegment(EigenSTL::vector_Affine3d poses);
+    bool appendDescartesJointPoint();
+    bool appendFreeSpaceSegment(std::vector<geometry_msgs::Pose> waypoints);
+    bool appendFreeSpaceCartPoint();
+    bool appendFreeSpaceJointPoint();
+    // void HybridPlanner::appendDescartesCartPoint(EigenSTL::vector_Affine3d& pose);
 
-  /* Create an axial trajectory pt from a given tf transform */
-  descartes_core::TrajectoryPtPtr tfToAxialTrajectoryPt(const tf::Transform& nominal, double discretization);   
+    /* Create an axial trajectory pt from a given tf transform */
+    descartes_core::TrajectoryPtPtr tfToAxialTrajectoryPt(const tf::Transform& nominal, double discretization);   
 
-  /*Translates a point relative to a reference pose to an absolute transformation
-  Also flips the z axis of the orientation to point INTO the plane specified by the
-  reference frame.*/
-  tf::Transform createNominalTransform(const geometry_msgs::Pose& ref_pose, const geometry_msgs::Point& point);
+    /*Translates a point relative to a reference pose to an absolute transformation
+    Also flips the z axis of the orientation to point INTO the plane specified by the
+    reference frame.*/
+    tf::Transform createNominalTransform(const geometry_msgs::Pose& ref_pose, const geometry_msgs::Point& point);
 
-  void fromDescartesToMoveitTrajectory(const descartes_traj& in_traj,
-                                              moveit_joint_traj& out_traj);
+    void fromDescartesToMoveitTrajectory(const descartes_traj& in_traj,
+                                                moveit_joint_traj& out_traj);
 
-  void publishPosesMarkers(const EigenSTL::vector_Affine3d& poses);
+    void publishPosesMarkers(const EigenSTL::vector_Affine3d& poses);
 
 
-protected:
+  protected:
 
-  /* Application Data
-   *  Holds the data used by the various functions in the application.
-   */
-  HybridConfiguration config_;
+    /* Data
+     * Holds the data used by the various functions  
+     */
+    HybridConfiguration config_;
 
-  /* Application ROS Constructs
-   *  Components needed to successfully run a ros-node and perform other important
-   *  ros-related tasks
-   */
-  ros::NodeHandle nh_;                        /* Object used for creating and managing ros application resources*/
-  ros::Publisher marker_publisher_;           /* Publishes visualization message to Rviz */
-  ros::ServiceClient moveit_run_path_client_; /* Sends a robot trajectory to moveit for execution */
+    /* ROS Constructs
+     * Components needed to successfully run a ros-node and perform other important
+     * ros-related tasks
+     */
+    ros::NodeHandle nh_;                        /* Object used for creating and managing ros resources*/
+    ros::Publisher marker_publisher_;           /* Publishes visualization message to Rviz */
+    ros::ServiceClient moveit_run_path_client_; /* Sends a robot trajectory to moveit for execution */
 
-  /* Application Descartes Constructs
-   *  Components accessing the path planning capabilities in the Descartes library
-   */
-  descartes_traj& descartes_traj_; /* Maintains the semi-constrained points and segments*/
-  //moveit_msgs::RobotTrajectory 
-  descartes_core::RobotModelPtr descartes_robot_model_ptr_; /* Performs tasks specific to the Robot
-                                                     such IK, FK and collision detection*/
-  descartes_planner::SparsePlanner sparse_planner_;      /* Plans a smooth robot path given a trajectory of points */
-  descartes_planner::DensePlanner dense_planner_;
-  moveit_msgs::RobotTrajectory moveit_trajectory_;
+    /* Descartes Constructs
+     * Components accessing the semi-constrained path planning capabilities in the Descartes library
+     */
+    descartes_traj& descartes_traj_; /* Maintains the semi-constrained points and segments*/
+    descartes_core::RobotModelPtr descartes_robot_model_ptr_; /* Performs tasks specific to the Robot
+                                                       such IK, FK and collision detection*/
+    descartes_planner::SparsePlanner sparse_planner_;      /* Plans a smooth robot path given a trajectory of points */
+    descartes_planner::DensePlanner dense_planner_;
+    int no_of_descartes_segments;
+
+    /* MoveIt! Constructs
+     * Components accesing the free-space planning capabilities in the MoveIt! library.
+     */
+    moveit::core::RobotStatePtr kinematic_state_;
+    robot_model::RobotModelConstPtr& kinematic_model_;
+    moveit::core::JointModelGroup* joint_model_group_; //TOCHECK what all to keep const
+    boost::shared_ptr<move_group_interface::MoveGroup> moveit_group_ptr_;
+    moveit_robot_traj moveit_robot_traj_;
+    robot_trajectory::RobotTrajectory overall_robot_traj_; //TODO better non-confusing names
+    move_group_interface::MoveGroup::Plan overall_plan_; //TOCHECK Member variable vs instantiate within the plan or addFreeSpaceSegment function?
+    int no_of_free_segments_; 
+    //TODO just one naming scheme to avoid confusion 
+    //Free vs process || descartes vs moveit 
 };
 
 } /* namespace */

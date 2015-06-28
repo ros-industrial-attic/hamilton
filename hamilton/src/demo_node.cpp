@@ -11,9 +11,9 @@
 
 int main(int argc,char** argv)
 {
-  // ros::init(argc,argv,"HybridPlanner");
-  // ros::AsyncSpinner spinner(2);
-  // spinner.start();
+  ros::init(argc,argv,"HybridPlanner");
+  ros::AsyncSpinner spinner(2);
+  spinner.start();
 
   // creating hybrid_planner_
   hamilton::HybridPlanner hybrid_planner_;
