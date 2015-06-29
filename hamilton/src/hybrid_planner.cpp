@@ -18,7 +18,13 @@ namespace hamilton
 		descartes_robot_model_ptr_.reset(new descartes_moveit::MoveitStateAdapter);
 		// TOCHECK as compared to: 
 		//descartes_core::RobotModelPtr model(new descartes_moveit::MoveitStateAdapter);
-
+		//TOCHECK or as in Godel
+		// init descartes with kinematic_state_ ? 
+		//   descartes_core::RobotModelPtr createRobotModel(const moveit::core::RobotStatePtr robot_state,
+                                                 // const std::string& group_name,
+                                                 // const std::string& tool_frame,
+                                                 // const std::string& world_frame,
+                                                 // uint8_t iterations)
 		if(descartes_robot_model_ptr_->initialize(ROBOT_DESCRIPTION_PARAM,
 		                              config_.group_name,
 		                              config_.world_frame,
@@ -61,13 +67,26 @@ namespace hamilton
 		marker_publisher_  = nh_.advertise<visualization_msgs::MarkerArray>(VISUALIZE_TRAJECTORY_TOPIC,1,true);
 
 		//Initializes MoveIt!
-		moveit_group_ptr_ = boost::shared_ptr<move_group_interface::MoveGroup>(new moveit_group_interface::MoveGroup(config_.group_name));
+		moveit_group_ptr_ = MoveGroupPtr(new moveit_group_interface::MoveGroup(config_.group_name));
+		//TOCHECK TODO doesn't compile
+		// home/ratnesh/projects/gsoc/src/hamilton/hamilton/src/hybrid_planner.cpp: In member function ‘void hamilton::HybridPlanner::init()’:
+		// /home/ratnesh/projects/gsoc/src/hamilton/hamilton/src/hybrid_planner.cpp:70:35: error: expected primary-expression before ‘(’ token
+		//    moveit_group_ptr_ = MoveGroupPtr(new moveit_group_interface::MoveGroup(config_.group_name));
+		//                                    ^
+		// /home/ratnesh/projects/gsoc/src/hamilton/hamilton/src/hybrid_planner.cpp:70:40: error: expected type-specifier before ‘moveit_group_interface’
+		//    moveit_group_ptr_ = MoveGroupPtr(new moveit_group_interface::MoveGroup(config_.group_name));
+		//                                         ^
+		// make[2]: *** [hamilton/hamilton/CMakeFiles/hamilton_demo.dir/src/hybrid_planner.cpp.o] Error 1
+		// make[1]: *** [hamilton/hamilton/CMakeFiles/hamilton_demo.dir/all] Error 2
+		// make: *** [all] Error 2
+		// Invoking "make -j8 -l8" failed
+
 		kinematic_state_ = moveit_group_ptr_->getCurrentState();
 		kinematic_state_->setToDefaultValues(); //TOCHECK
 		kinematic_model_ = kinematic_state_->getRobotModel();
 		joint_model_group_ = kinematic_model_->getJointModelGroup(config_.group_name); 
 		no_of_free_segments_ = 0;
-		// ROS_INFO_STREAM("MoveIt! members initialized");
+		ROS_INFO_STREAM("MoveIt! members initialized");
 
 		// //creates a moveit_msgs::ExecuteKnownTrajectory client and assign it to the moveit_run_path_client_ member variable.  
 		// moveit_run_path_client_ = nh_.serviceClient<moveit_msgs::ExecuteKnownTrajectory>(EXECUTE_TRAJECTORY_SERVICE,true);
@@ -131,14 +150,14 @@ namespace hamilton
 	bool HybridPlanner::appendDescartesCartPoint(Eigen::Affine3d& pose)
 	{	
 		//TOCHECK pass const parameter? 
-		//TODO allocate size of descartes_traj_ or just suffice by push_back()?
+		//TODO allocate size of descartes_traj_input_ or just suffice by push_back()?
 	  	using namespace descartes_core;
   		using namespace descartes_trajectory;
 	  	TrajectoryPtPtr pt = TrajectoryPtPtr(new CartTrajectoryPt(TolerancedFrame(pose)));
 	  	
 	  	if(!pt)
   		{	
-  			descartes_traj_.push_back(pt);
+  			descartes_traj_input_.push_back(pt);
 	  	// publishing trajectory pose for visualization
 	  	// publishPosesMarkers(pose);
   			return 1;	
@@ -157,7 +176,7 @@ namespace hamilton
 	  	using namespace descartes_trajectory;
 	  	TrajectoryPtPtr pt = TrajectoryPtPtr(new AxialSymmetricPt(pose, ORIENTATION_INCREMENT, 
 	  															AxialSymmetricPt::Z_AXIS));
-	  	descartes_traj_.push_back(pt);
+	  	descartes_traj_input_.push_back(pt);
 	}
 
 	bool HybridPlanner::appendDescartesCartPointSegment(EigenSTL::vector_Affine3d poses)
@@ -180,7 +199,8 @@ namespace hamilton
                                                    descartes_trajectory::AxialSymmetricPt::FreeAxis::Z_AXIS) );
 
 		    // saving points into trajectory
-		    descartes_traj_.push_back(pt);
+		    descartes_traj_input_.push_back(pt);
+		    no_of_descartes_segments_ +=1; 
 		}
 
 	}
@@ -287,14 +307,14 @@ namespace hamilton
 
 	bool HybridPlanner::appendFreeSpaceSegment(std::vector<geometry_msgs::Pose> waypoints)
 	{
-		
 		// moveit_trajectory_.append(waypoint);
 		// moveit_trajectory_.push_back(waypoints);
+
 		// TODO TOCHECK maintain waypoints and call computecartesianpath in the plan / execute function
 		// We want the cartesian path to be interpolated at a resolution of 1 cm which is why we will specify 0.01 as the max step in cartesian translation. 
 		// We will specify the jump threshold as 0.0, effectively disabling it.
 
-		double fraction = moveit_group_ptr_.computeCartesianPath(waypoints,
+		double fraction = moveit_group_ptr_-> computeCartesianPath(waypoints,
 		                                             config_.step_size,  // eef_step
 		                                             config_.jump_thresh,   // jump_threshold
 		                                             moveit_robot_traj_);	
@@ -312,7 +332,6 @@ namespace hamilton
 		//TOCHECK this might mess up with the stored "descartesToMoveIt" trajectories?
 	    // overall_robot_traj_.getRobotTrajectoryMsg(moveit_robot_traj_);
 	    no_of_free_segments_ += 1;
-
 	}
 
 
@@ -369,47 +388,123 @@ namespace hamilton
 	// void HybridPlanner::moveit_computeCartesianPath(const std::vector<geometry_msgs::Pose>& waypoints)
 	// {
 	// 	double result = group.computeCartesianPath(const std::vector<geometry_msgs::Pose> &waypoints, double eef_step, double jump_threshold,
- //                  moveit_msgs::RobotTrajectory &trajectory,  bool avoid_collisions = true);
+ 	//                  moveit_msgs::RobotTrajectory &trajectory,  bool avoid_collisions = true);
 	// }
 
+	//TODO stick to one naming scheme 
+	void HybridPlanner::planProcessPath()
+	{	
+		//TOCHECK is this necessary. This is for a special case of Axial_Symm_Points. 
+		//TOCHECK Make demos for various types (blending, etc?) i.e. (rot symm, etc)
+		std::vector<double> start_pose, end_pose;
+		if(descartes_traj_input_.front()->getClosestJointPose(config_.seed_pose,*descartes_robot_model_ptr_,start_pose) &&
+		descartes_traj_input_.back()->getClosestJointPose(config_.seed_pose,*descartes_robot_model_ptr_,end_pose))
+		{
+		ROS_INFO_STREAM("Setting trajectory start and end to JointTrajectoryPts");
 
-	// void HybridPlanner::fromDescartesToMoveitTrajectory(const DescartesTrajectory& in_traj)
-	// {
-	//   // Fill out information about our trajectory
-	//   descartes_traj_.header.stamp = ros::Time::now();
-	//   descartes_traj_.header.frame_id = config_.world_frame;
-	//   descartes_traj_.joint_names = config_.joint_names;
+		// Creating Start JointTrajectoryPt from start joint pose
+		descartes_core::TrajectoryPtPtr start_joint_point = descartes_core::TrajectoryPtPtr(
+		new descartes_trajectory::JointTrajectoryPt(start_pose));
 
-	//   // For keeping track of time-so-far in the trajectory
-	//   double time_offset = 0.0;
+		// Creating End JointTrajectoryPt from end joint pose
+		descartes_core::TrajectoryPtPtr end_joint_point = descartes_core::TrajectoryPtPtr(
+		new descartes_trajectory::JointTrajectoryPt(end_pose));
 
-	//   // Loop through the trajectory
-	//   for (unsigned int i = 0; i < in_traj.size(); i++)
-	//   {
-	//     // Find nominal joint solution at this point
-	//     std::vector<double> joints;
+		// Modifying start and end of the trajectory.
+		descartes_traj_input_[0] = start_joint_point;
+		descartes_traj_input_[descartes_traj_input_.size() - 1 ] = end_joint_point;
+		}
+		else
+		{
+		ROS_ERROR_STREAM("Failed to find closest joint pose to seed pose at the start or end of trajectory");
+		exit(-1);
+		}
 
-	//     // getting joint position at current point
-	//     const descartes_core::TrajectoryPtPtr& joint_point = in_traj[i];
-	//     joint_point->getNominalJointPose(std::vector<double>(), *descartes_robot_model_ptr_, joints);
+		//TOCHECK Should the planners be initialized/modified in here instead of init()
+		//as the RobotPtr might have changed in its internal parameters
 
-	//     // Fill out a ROS trajectory point
-	//     trajectory_msgs::JointTrajectoryPoint pt;
-	//     pt.positions = joints;
-	//     // velocity, acceleration, and effort are given dummy values
-	//     // we'll let the controller figure them out
-	//     pt.velocities.resize(joints.size(), 0.0);
-	//     pt.accelerations.resize(joints.size(), 0.0);
-	//     pt.effort.resize(joints.size(), 0.0);
-	//     // set the time into the trajectory
-	//     pt.time_from_start = ros::Duration(time_offset);
-	//     // increment time
-	//     time_offset += config_.time_delay;
+		if(config_.descartes_planner_type == "dense")
+		{
+			bool succeeded = dense_planner_.planPath(descartes_traj_input_);
+			if (succeeded)
+			{
+			ROS_INFO_STREAM("Valid path was found using the Descartes dense planner");
+			}
+			else
+			{
+			ROS_ERROR_STREAM("Could not solve for a valid path using the Descartes dense planner");
+			exit(-1);
+			}
 
-	//     descartes_traj_.points.push_back(pt);
-	//   }
+			succeeded = dense_planner_.getPath(descartes_traj_output_);
 
-	// }
+			if(!succeeded || descartes_traj_output_.empty())
+			{
+			ROS_ERROR_STREAM("Failed to retrieve robot path");
+			}
+		}
+
+		if(config_.descartes_planner_type == "sparse")
+		{
+			bool succeeded = sparse_planner_.planPath(descartes_traj_input_);
+			if (succeeded)
+			{
+			ROS_INFO_STREAM("Valid path was found using the Descartes sparse planner");
+			}
+			else
+			{
+			ROS_ERROR_STREAM("Could not solve for a valid path using the Descartes sparse planner");
+			exit(-1);
+			}
+
+			succeeded = sparse_planner_.getPath(descartes_traj_output_);
+
+			if(!succeeded || descartes_traj_output_.empty())
+			{
+			ROS_ERROR_STREAM("Failed to retrieve robot path");
+			}
+		}
+		
+		ROS_INFO_STREAM("Task '"<<__FUNCTION__<<"' completed");
+	}
+
+	void HybridPlanner::fromDescartesToMoveitTrajectory(const descartes_traj& in_traj)
+	{
+	  // Fill out information about our trajectory
+	  joint_traj_descartes_.header.stamp = ros::Time::now();
+	  joint_traj_descartes_.header.frame_id = config_.world_frame;
+	  joint_traj_descartes_.joint_names = config_.joint_names;
+
+	  // For keeping track of time-so-far in the trajectory
+	  double time_offset = 0.0;
+
+	  // Loop through the trajectory
+	  for (unsigned int i = 0; i < in_traj.size(); i++)
+	  {
+	    // Find nominal joint solution at this point
+	    std::vector<double> joints;
+
+	    // getting joint position at current point
+	    const descartes_core::TrajectoryPtPtr& joint_point = in_traj[i];
+	    joint_point->getNominalJointPose(std::vector<double>(), *descartes_robot_model_ptr_, joints);
+
+	    // Fill out a ROS trajectory point
+	    trajectory_msgs::JointTrajectoryPoint pt;
+	    pt.positions = joints;
+	    // velocity, acceleration, and effort are given dummy values
+	    // we'll let the controller figure them out
+	    pt.velocities.resize(joints.size(), 0.0);
+	    pt.accelerations.resize(joints.size(), 0.0);
+	    pt.effort.resize(joints.size(), 0.0);
+	    // set the time into the trajectory
+	    pt.time_from_start = ros::Duration(time_offset);
+	    // increment time
+	    time_offset += config_.time_delay;
+
+	    joint_traj_descartes_.points.push_back(pt);
+	  }
+
+	}
 }
 
 #include "hamilton/hybrid_planner.h"
@@ -438,11 +533,11 @@ int main(int argc, char** argv)
 
 
   // // planning robot path
-  // HybridPlanner::DescartesTrajectory output_path;
-  // hybrid_planner_.planPath(traj,output_path);
+  // HybridPlanner::DescartesTrajectory descartes_traj_output_;
+  // hybrid_planner_.planPath(traj,descartes_traj_output_);
 
   // // running robot path
-  // hybrid_planner_.runPath(output_path);
+  // hybrid_planner_.runPath(descartes_traj_output_);
 
   // exiting ros node
   spinner.stop();

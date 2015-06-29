@@ -44,7 +44,7 @@ typedef descartes_trajectory::CartTrajectoryPt descartes_cart_pt;
 typedef descartes_trajectory::JointTrajectoryPt descartes_joint_traj_pt;
 typedef moveit_msgs::RobotTrajectory moveit_robot_traj;
 typedef trajectory_msgs::JointTrajectory moveit_joint_traj;
-// typedef boost::shared_ptr<move_group_interface::MoveGroup> MoveGroupPtr;
+typedef boost::shared_ptr<move_group_interface::MoveGroup> MoveGroupPtr;
 // typedef moveit_msgs::RobotTrajectory::joint_trajectory moveit_joint_traj;
 // typedef trajectory_msgs::JointTrajectory moveit_joint_traj;
 // typedef descartes_core::RobotModelPtr descartes_robot_model_ptr;
@@ -94,6 +94,7 @@ struct HybridConfiguration
   const bool avoid_collision;
 
   const bool descartes_replan; //TOCHECK 
+  std::string descartes_planner_type; //dense vs sparse
 };
 
 
@@ -129,6 +130,8 @@ class HybridPlanner
     bool appendFreeSpaceSegment(std::vector<geometry_msgs::Pose> waypoints);
     bool appendFreeSpaceCartPoint();
     bool appendFreeSpaceJointPoint();
+    void planProcessPath();
+
     // void HybridPlanner::appendDescartesCartPoint(EigenSTL::vector_Affine3d& pose);
 
     /* Create an axial trajectory pt from a given tf transform */
@@ -139,8 +142,8 @@ class HybridPlanner
     reference frame.*/
     tf::Transform createNominalTransform(const geometry_msgs::Pose& ref_pose, const geometry_msgs::Point& point);
 
-    void fromDescartesToMoveitTrajectory(const descartes_traj& in_traj,
-                                                moveit_joint_traj& out_traj);
+    void fromDescartesToMoveitTrajectory(const descartes_traj& in_traj);
+
 
     void publishPosesMarkers(const EigenSTL::vector_Affine3d& poses);
 
@@ -163,19 +166,21 @@ class HybridPlanner
     /* Descartes Constructs
      * Components accessing the semi-constrained path planning capabilities in the Descartes library
      */
-    descartes_traj& descartes_traj_; /* Maintains the semi-constrained points and segments*/
+    descartes_traj& descartes_traj_input_;
+    descartes_traj& descartes_traj_output_;  /* Maintains the semi-constrained points and segments*/
+    trajectory_msgs::JointTrajectory& joint_traj_descartes_;//TODO change name
     descartes_core::RobotModelPtr descartes_robot_model_ptr_; /* Performs tasks specific to the Robot
                                                        such IK, FK and collision detection*/
     descartes_planner::SparsePlanner sparse_planner_;      /* Plans a smooth robot path given a trajectory of points */
     descartes_planner::DensePlanner dense_planner_;
-    int no_of_descartes_segments;
+    int no_of_descartes_segments_;
 
     /* MoveIt! Constructs
      * Components accesing the free-space planning capabilities in the MoveIt! library.
      */
     moveit::core::RobotStatePtr kinematic_state_;
     robot_model::RobotModelConstPtr& kinematic_model_;
-    moveit::core::JointModelGroup* joint_model_group_; //TOCHECK what all to keep const
+    const moveit::core::JointModelGroup* joint_model_group_; //TOCHECK what all to keep const coz of return type of kinematic_model_->getJointModelGroup
     boost::shared_ptr<move_group_interface::MoveGroup> moveit_group_ptr_;
     moveit_robot_traj moveit_robot_traj_;
     robot_trajectory::RobotTrajectory overall_robot_traj_; //TODO better non-confusing names
