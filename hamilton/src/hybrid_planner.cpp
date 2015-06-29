@@ -320,7 +320,7 @@ namespace hamilton
 		                                             moveit_robot_traj_);	
 
 		robot_trajectory::RobotTrajectory robot_traj_segment(kinematic_model_, config_.group_name);
-		robot_traj_segment.setRobotTrajectoryMsg(*kinematic_state_, moveit_robot_traj_);
+		robot_traj_segment.setRobotTrajectoryMsg(	*kinematic_state_, moveit_robot_traj_);
 		// robot_state::RobotState last_robot_state = robot_traj_segment.getLastWayPoint();
 
 		overall_robot_traj_.setRobotTrajectoryMsg(*kinematic_state_, moveit_robot_traj_);
@@ -468,7 +468,36 @@ namespace hamilton
 		ROS_INFO_STREAM("Task '"<<__FUNCTION__<<"' completed");
 	}
 
-	void HybridPlanner::fromDescartesToMoveitTrajectory(const descartes_traj& in_traj)
+	void HybridPlanner::runPath()
+	{
+		moveit_group_ptr_->setPlannerId(PLANNER_ID);//TOCHECK should be in init(). Also the config_ param or not doubt. Check header file. 
+		overall_robot_traj_.getRobotTrajectoryMsg(moveit_robot_traj_);
+
+		// creating goal joint pose to start of the path
+		// std::vector<double> seed_pose(robot_model_ptr_->getDOF());
+  		std::vector<double> start_pose;
+  		descartes_core::TrajectoryPtPtr first_point_ptr = path[0];
+		first_point_ptr->getNominalJointPose(config_.seed_pose,*descartes_robot_model_ptr_,start_pose);
+
+		// moving arm to joint goal
+		moveit_group_ptr_->setJointValueTarget(start_pose);
+		moveit_group_ptr_->setPlanningTime(config_.plan_time);
+		moveit_msgs::MoveItErrorCodes result = moveit_group_ptr_->move();
+		if(result.val != result.SUCCESS)
+		{
+		ROS_ERROR_STREAM("Move to start joint pose failed");
+		exit(-1);
+		}
+
+		// creating Moveit! joint trajectory from Descartes Trajectory
+		fromDescartesToMoveitTrajectory();
+
+		//all free space segments now in moveit_robot_traj_ and 
+		//all process segments in trajectory_msgs::JointTrajectory& joint_traj_descartes_
+		//TOCHECK TODO to combine them, again use robot_trajectory?
+	}
+
+	void HybridPlanner::fromDescartesToMoveitTrajectory()
 	{
 	  // Fill out information about our trajectory
 	  joint_traj_descartes_.header.stamp = ros::Time::now();
@@ -479,13 +508,13 @@ namespace hamilton
 	  double time_offset = 0.0;
 
 	  // Loop through the trajectory
-	  for (unsigned int i = 0; i < in_traj.size(); i++)
+	  for (unsigned int i = 0; i < descartes_traj_input_.size(); i++)
 	  {
 	    // Find nominal joint solution at this point
 	    std::vector<double> joints;
 
 	    // getting joint position at current point
-	    const descartes_core::TrajectoryPtPtr& joint_point = in_traj[i];
+	    const descartes_core::TrajectoryPtPtr& joint_point = descartes_traj_input_[i];
 	    joint_point->getNominalJointPose(std::vector<double>(), *descartes_robot_model_ptr_, joints);
 
 	    // Fill out a ROS trajectory point

@@ -118,7 +118,7 @@ class HybridPlanner
     void moveHome();
     void generateTrajectory(descartes_traj& traj);
     void planPath(descartes_traj& input_traj,descartes_traj& output_path);
-    void runPath(const descartes_traj& path);
+    void runPath();
 
   protected:
     // TOCHECK bool vs void. 
@@ -142,7 +142,7 @@ class HybridPlanner
     reference frame.*/
     tf::Transform createNominalTransform(const geometry_msgs::Pose& ref_pose, const geometry_msgs::Point& point);
 
-    void fromDescartesToMoveitTrajectory(const descartes_traj& in_traj);
+    void HybridPlanner::fromDescartesToMoveitTrajectory();
 
 
     void publishPosesMarkers(const EigenSTL::vector_Affine3d& poses);
