@@ -100,12 +100,12 @@ int main(int argc, char** argv)
   planner.initialize(model);
   robot_trajectory::RobotTrajectory overall_robot_traj(group.getCurrentState()->getRobotModel(), "manipulator");
 
+
+
   // Generate some MoveIt | free space waypoints
   std::vector<geometry_msgs::Pose> waypoints;
   for(int i = 0; i < 8; ++i)
   {
-    target_pose.position.x = 0.25;
-    target_pose.position.y = 0.25;
     target_pose.position.z = 1.0 + 0.05*i;
     waypoints.push_back(target_pose); 
   }
@@ -116,12 +116,30 @@ int main(int argc, char** argv)
   for (unsigned int i = 0; i < 10; ++i)
   {
     Eigen::Affine3d pose;
-    pose = Eigen::Translation3d(0.25, 0.25, 1.4 - 0.05 * i);
+    pose = Eigen::Translation3d(0.25, 0.25, 1.4 - 0.05*i);
     descartes_core::TrajectoryPtPtr pt = makeTolerancedCartesianPoint(pose);
     points.push_back(pt);
   }
-
   addProcessSegment(points, planner, group, model, overall_robot_traj, nh);
+
+  // Generate some MoveIt | free space waypoints
+  std::vector<geometry_msgs::Pose> waypoints_2;
+  for(int i = 0; i < 20; ++i)
+  {
+    target_pose.position.y -= 0.05;
+    waypoints_2.push_back(target_pose); 
+  }
+  addFreeSpaceSegment(waypoints_2, group, overall_robot_traj);
+
+  TrajectoryVec points_2;
+  for (unsigned int i = 0; i < 10; ++i)
+  {
+    Eigen::Affine3d pose;
+    pose = Eigen::Translation3d(0.25 + 0.05*i, -0.75, 0.9);
+    descartes_core::TrajectoryPtPtr pt = makeTolerancedCartesianPoint(pose);
+    points_2.push_back(pt);
+  }
+  addProcessSegment(points_2, planner, group, model, overall_robot_traj, nh);
 
   moveit_msgs::RobotTrajectory combined;
   overall_robot_traj.getRobotTrajectoryMsg(combined);
@@ -270,4 +288,5 @@ void addProcessSegment(TrajectoryVec points, descartes_planner::DensePlanner& pl
   robot_trajectory::RobotTrajectory descartes_robot_traj(group.getCurrentState()->getRobotModel(), "manipulator");
   descartes_robot_traj.setRobotTrajectoryMsg(*group.getCurrentState(), descartes_joint_solution);
   overall_robot_traj.append(descartes_robot_traj, descartes_robot_traj.getWaypointDurationFromStart(descartes_robot_traj.getWayPointCount())); 
+  ROS_INFO("Appended process segment");
 }
