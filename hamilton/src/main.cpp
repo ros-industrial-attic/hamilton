@@ -1,31 +1,16 @@
-// Core ros functionality like ros::init and spin
 #include <ros/ros.h>
-// ROS Trajectory Action server definition
-#include <control_msgs/FollowJointTrajectoryAction.h>
-// Means by which we communicate with above action-server
 #include <actionlib/client/simple_action_client.h>
-
-// Includes the descartes robot model we will be using
+#include <control_msgs/FollowJointTrajectoryAction.h>
 #include <descartes_moveit/moveit_state_adapter.h>
-// Includes the descartes trajectory type we will be using
+#include <descartes_planner/dense_planner.h>
 #include <descartes_trajectory/axial_symmetric_pt.h>
 #include <descartes_trajectory/cart_trajectory_pt.h>
-// Includes the planner we will be using
-#include <descartes_planner/dense_planner.h>
-// #include <boost/function.hpp>
-// #include <boost/assign/list_of.hpp>
 #include <moveit/move_group_interface/move_group.h>
-#include <moveit/robot_trajectory/robot_trajectory.h>
 #include <moveit/robot_model_loader/robot_model_loader.h>
-// #include <moveit/planning_interface/planning_interface.h>
-#include <moveit_msgs/DisplayTrajectory.h>
-// #include <moveit_msgs/PlanningScene.h>
 #include <moveit/robot_state/conversions.h>
+#include <moveit/robot_trajectory/robot_trajectory.h>
 #include <moveit/trajectory_processing/iterative_time_parameterization.h>
-// #include <geometry_msgs/PoseArray.h>
-// #include <visualization_msgs/MarkerArray.h>
-// #include <eigen_conversions/eigen_msg.h>
-
+#include <moveit_msgs/DisplayTrajectory.h>
 
 typedef std::vector<descartes_core::TrajectoryPtPtr> TrajectoryVec;
 typedef TrajectoryVec::const_iterator TrajectoryIter;
@@ -61,39 +46,35 @@ int main(int argc, char** argv)
   ros::AsyncSpinner spinner (1);
   spinner.start();
 
+  // Initialize a MoveIt! group
   moveit::planning_interface::MoveGroup group("manipulator");
-  // ros::Publisher display_publisher = nh.advertise<moveit_msgs::DisplayTrajectory>("/move_group/display_planned_path", 1, true);
-  // moveit_msgs::DisplayTrajectory display_trajectory;
-  moveit::planning_interface::MoveGroup::Plan plan;
-  std::vector<geometry_msgs::Pose> waypoints;
-  geometry_msgs::Pose target_pose;
+
+  // Move to home
   group.setNamedTarget("home");
   group.move();
-  
+    
+  // Move to target pose
+  geometry_msgs::Pose target_pose;
   target_pose.position.x = 0.25;
   target_pose.position.y = 0.25;
   target_pose.position.z = 1.0;
   group.setPoseTarget(target_pose);
   group.move();
+  
+  // Generate some MoveIt | free space waypoints
+  // Go up in z direction relative to the target pose   
+  // Doesn't define any orientation
+  // TODO orientation.w only(meaning?) v/s full quaternion
+  std::vector<geometry_msgs::Pose> waypoints;
   for(int i = 0; i < 8; ++i)
   {
-    // target_pose.orientation.w = 1.0; //try full quaternion
     target_pose.position.x = 0.25;
     target_pose.position.y = 0.25;
     target_pose.position.z = 1.0 + 0.05*i;
     waypoints.push_back(target_pose); 
   }
 
-  //   for(int i = 0; i < 10; ++i)
-  // {
-  //   // target_pose.orientation.w = 1.0; //try full quaternion
-  //   // target_pose.position.x = 0;
-  //   // target_pose.position.y = 0.4;
-  //   target_pose.position.z = 1.0 + 0.05*i;
-  //   waypoints.push_back(target_pose); 
-  // }
-
-  // 1. Define sequence of points
+  // Generate some Descartes | semi-constrained waypoints
   TrajectoryVec points;
   for (unsigned int i = 0; i < 10; ++i)
   {
@@ -103,21 +84,14 @@ int main(int argc, char** argv)
     points.push_back(pt);
   }
 
-  // for (unsigned int i = 0; i < 5; ++i)
-  // {
-  //   Eigen::Affine3d pose;
-  //   pose = Eigen::Translation3d(0.0, 0.04 * i, 1.3);
-  //   descartes_core::TrajectoryPtPtr pt = makeTolerancedCartesianPoint(pose);
-  //   points.push_back(pt);
-  // }
-
-  // 2. Create a robot model and initialize it
+  // Create a Descartes robot model and initialize it
   descartes_core::RobotModelPtr model (new descartes_moveit::MoveitStateAdapter);
 
   // Name of description on parameter server. Typically just "robot_description".
   const std::string robot_description = "robot_description";
 
   // name of the kinematic group you defined when running MoveitSetupAssistant
+  // TODO Fermi has an issue of hardcoded manipulator. Avoid in Hamilton
   const std::string group_name = "manipulator";
 
   // Name of frame in which you are expressing poses. Typically "world_frame" or "base_link".
@@ -132,9 +106,9 @@ int main(int argc, char** argv)
     return -1;
   }
 
+  // MoveIt! planning
   moveit_msgs::RobotTrajectory moveit_robot_traj;
   group.setPlanningTime(10.0); 
-
   double fraction = group.computeCartesianPath(waypoints,
                                                0.01,  // eef_step
                                                0,   // jump_threshold
@@ -148,19 +122,11 @@ int main(int argc, char** argv)
   rt.getRobotTrajectoryMsg(moveit_robot_traj);
   ROS_INFO("Visualizing plan (cartesian path) (%.2f%% acheived)",fraction * 100.0); 
 
-  plan.trajectory_ = moveit_robot_traj;
-  // group.execute(plan);
-
-  // display_trajectory.trajectory_start = plan.start_state_;
-  // display_trajectory.trajectory.push_back(plan.trajectory_);
-  // display_publisher.publish(display_trajectory);
-
-
-  // 3. Create a planner and initialize it with our robot model
+  // Create a Descartes planner and initialize it with the Descartes robot model
   descartes_planner::DensePlanner planner;
   planner.initialize(model);
 
-  // 4. Feed the trajectory to the planner
+  // Feed the Descartes trajectory to the planner and get the result
   if (!planner.planPath(points))
   {
     ROS_ERROR("Could not solve for a valid path");
@@ -174,7 +140,7 @@ int main(int argc, char** argv)
     return -3;
   }
 
-  // 5. Translate the result into a type that ROS understands
+  // Translate the result into a type that ROS understands
   // Get Joint Names
   std::vector<std::string> names;
   nh.getParam("controller_joint_names", names);
@@ -182,6 +148,7 @@ int main(int argc, char** argv)
   // a certain time delta between each trajectory point
   trajectory_msgs::JointTrajectory descartes_joint_solution = toROSJointTrajectory(result, *model, names, 1.0);
 
+  //Stitching
   trajectory_msgs::JointTrajectory moveit_joint_traj = moveit_robot_traj.joint_trajectory;
   robot_trajectory::RobotTrajectory overall_robot_traj(group.getCurrentState()->getRobotModel(), "manipulator");
   robot_trajectory::RobotTrajectory descartes_robot_traj(group.getCurrentState()->getRobotModel(), "manipulator");
@@ -190,22 +157,32 @@ int main(int argc, char** argv)
   overall_robot_traj.append(descartes_robot_traj, descartes_robot_traj.getWaypointDurationFromStart(descartes_robot_traj.getWayPointCount()));
   moveit_msgs::RobotTrajectory combined;
   overall_robot_traj.getRobotTrajectoryMsg(combined);
+  trajectory_msgs::JointTrajectory joints_combined = combined.joint_trajectory;
+  
   //TOMIGHTDO http://docs.ros.org/hydro/api/moveit_core/html/classrobot__trajectory_1_1RobotTrajectory.html
   //This API could be improved by allowing for trajectory_msgs::JointTrajectory &trajectory argument in void getRobotTrajectoryMsg 
   //Coz for setRobotTrajectory msg, you could pass trajectory_msgs::JointTrajectory or moveit_msgs::RobotTrajectory as done for Descartes above
-  trajectory_msgs::JointTrajectory joints_combined = combined.joint_trajectory;
 
-  // 6. Send the ROS trajectory to the robot for execution
+  // Send the ROS trajectory to the robot for execution\
+
+  //// Debugging////
+
+  // Only MoveIt! wanted
   // if (!executeTrajectory(moveit_joint_traj))
   // {
   //   ROS_ERROR("Could not execute trajectory!");
   //   return -4;
   // }
+
+  // Only Descartes wanted
   // if (!executeTrajectory(descartes_joint_solution))
   // {
   //   ROS_ERROR("Could not execute trajectory!");
   //   return -4;
   // }
+
+  ////Debugging////
+
   if (!executeTrajectory(joints_combined))
   {
     ROS_ERROR("Could not execute trajectory!");
@@ -215,6 +192,12 @@ int main(int argc, char** argv)
   ROS_INFO("Done!");
   return 0;
 }
+
+
+
+
+
+
 
 descartes_core::TrajectoryPtPtr makeCartesianPoint(const Eigen::Affine3d& pose)
 {
