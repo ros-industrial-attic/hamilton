@@ -36,6 +36,18 @@ toROSJointTrajectory(const TrajectoryVec& trajectory, const descartes_core::Robo
  */
 bool executeTrajectory(const trajectory_msgs::JointTrajectory& trajectory);
 
+/**
+ * Plans for them, appends in overall_robot_traj
+ */
+void addFreeSpaceSegment(std::vector<geometry_msgs::Pose> waypoints, moveit::planning_interface::MoveGroup& group, robot_trajectory::RobotTrajectory& overall_robot_traj);
+//second argument to avoid global variables
+
+/**
+ * Plans for process path points, and appends them to overall_robot_traj
+ * TODO make argument for planner generic => Use pathPlannerBase
+ */
+void addProcessSegment(TrajectoryVec points, descartes_planner::DensePlanner& planner, moveit::planning_interface::MoveGroup& group, descartes_core::RobotModelPtr model, robot_trajectory::RobotTrajectory& overall_robot_traj, ros::NodeHandle& nh);
+
 int main(int argc, char** argv)
 {
   // Initialize ROS
@@ -61,28 +73,6 @@ int main(int argc, char** argv)
   group.setPoseTarget(target_pose);
   group.move();
   
-  // Generate some MoveIt | free space waypoints
-  // Go up in z direction relative to the target pose   
-  // Doesn't define any orientation
-  // TODO orientation.w only(meaning?) v/s full quaternion
-  std::vector<geometry_msgs::Pose> waypoints;
-  for(int i = 0; i < 8; ++i)
-  {
-    target_pose.position.x = 0.25;
-    target_pose.position.y = 0.25;
-    target_pose.position.z = 1.0 + 0.05*i;
-    waypoints.push_back(target_pose); 
-  }
-
-  // Generate some Descartes | semi-constrained waypoints
-  TrajectoryVec points;
-  for (unsigned int i = 0; i < 10; ++i)
-  {
-    Eigen::Affine3d pose;
-    pose = Eigen::Translation3d(0.25, 0.25, 1.4 - 0.05 * i);
-    descartes_core::TrajectoryPtPtr pt = makeTolerancedCartesianPoint(pose);
-    points.push_back(pt);
-  }
 
   // Create a Descartes robot model and initialize it
   descartes_core::RobotModelPtr model (new descartes_moveit::MoveitStateAdapter);
@@ -106,55 +96,33 @@ int main(int argc, char** argv)
     return -1;
   }
 
-  // MoveIt! planning
-  moveit_msgs::RobotTrajectory moveit_robot_traj;
-  group.setPlanningTime(10.0); 
-  double fraction = group.computeCartesianPath(waypoints,
-                                               0.01,  // eef_step
-                                               0,   // jump_threshold
-                                               moveit_robot_traj); 
-
-  robot_trajectory::RobotTrajectory rt(group.getCurrentState()->getRobotModel(), "manipulator");
-  rt.setRobotTrajectoryMsg(*group.getCurrentState(), moveit_robot_traj);
-  trajectory_processing::IterativeParabolicTimeParameterization iptp;
-  bool success = iptp.computeTimeStamps(rt);
-  ROS_INFO("Computed time stamp %s",success?"SUCCEDED":"FAILED");
-  rt.getRobotTrajectoryMsg(moveit_robot_traj);
-  ROS_INFO("Visualizing plan (cartesian path) (%.2f%% acheived)",fraction * 100.0); 
-
-  // Create a Descartes planner and initialize it with the Descartes robot model
   descartes_planner::DensePlanner planner;
   planner.initialize(model);
-
-  // Feed the Descartes trajectory to the planner and get the result
-  if (!planner.planPath(points))
-  {
-    ROS_ERROR("Could not solve for a valid path");
-    return -2;
-  }
-
-  TrajectoryVec result;
-  if (!planner.getPath(result))
-  {
-    ROS_ERROR("Could not retrieve path");
-    return -3;
-  }
-
-  // Translate the result into a type that ROS understands
-  // Get Joint Names
-  std::vector<std::string> names;
-  nh.getParam("controller_joint_names", names);
-  // Generate a ROS joint trajectory with the result path, robot model, given joint names,
-  // a certain time delta between each trajectory point
-  trajectory_msgs::JointTrajectory descartes_joint_solution = toROSJointTrajectory(result, *model, names, 1.0);
-
-  //Stitching
-  trajectory_msgs::JointTrajectory moveit_joint_traj = moveit_robot_traj.joint_trajectory;
   robot_trajectory::RobotTrajectory overall_robot_traj(group.getCurrentState()->getRobotModel(), "manipulator");
-  robot_trajectory::RobotTrajectory descartes_robot_traj(group.getCurrentState()->getRobotModel(), "manipulator");
-  overall_robot_traj.setRobotTrajectoryMsg(*group.getCurrentState(), moveit_robot_traj);
-  descartes_robot_traj.setRobotTrajectoryMsg(*group.getCurrentState(), descartes_joint_solution);
-  overall_robot_traj.append(descartes_robot_traj, descartes_robot_traj.getWaypointDurationFromStart(descartes_robot_traj.getWayPointCount()));
+
+  // Generate some MoveIt | free space waypoints
+  std::vector<geometry_msgs::Pose> waypoints;
+  for(int i = 0; i < 8; ++i)
+  {
+    target_pose.position.x = 0.25;
+    target_pose.position.y = 0.25;
+    target_pose.position.z = 1.0 + 0.05*i;
+    waypoints.push_back(target_pose); 
+  }
+  addFreeSpaceSegment(waypoints, group, overall_robot_traj);
+
+  // Generate some Descartes | semi-constrained waypoints
+  TrajectoryVec points;
+  for (unsigned int i = 0; i < 10; ++i)
+  {
+    Eigen::Affine3d pose;
+    pose = Eigen::Translation3d(0.25, 0.25, 1.4 - 0.05 * i);
+    descartes_core::TrajectoryPtPtr pt = makeTolerancedCartesianPoint(pose);
+    points.push_back(pt);
+  }
+
+  addProcessSegment(points, planner, group, model, overall_robot_traj, nh);
+
   moveit_msgs::RobotTrajectory combined;
   overall_robot_traj.getRobotTrajectoryMsg(combined);
   trajectory_msgs::JointTrajectory joints_combined = combined.joint_trajectory;
@@ -163,26 +131,7 @@ int main(int argc, char** argv)
   //This API could be improved by allowing for trajectory_msgs::JointTrajectory &trajectory argument in void getRobotTrajectoryMsg 
   //Coz for setRobotTrajectory msg, you could pass trajectory_msgs::JointTrajectory or moveit_msgs::RobotTrajectory as done for Descartes above
 
-  // Send the ROS trajectory to the robot for execution\
-
-  //// Debugging////
-
-  // Only MoveIt! wanted
-  // if (!executeTrajectory(moveit_joint_traj))
-  // {
-  //   ROS_ERROR("Could not execute trajectory!");
-  //   return -4;
-  // }
-
-  // Only Descartes wanted
-  // if (!executeTrajectory(descartes_joint_solution))
-  // {
-  //   ROS_ERROR("Could not execute trajectory!");
-  //   return -4;
-  // }
-
-  ////Debugging////
-
+  // Send the ROS trajectory to the robot for execution
   if (!executeTrajectory(joints_combined))
   {
     ROS_ERROR("Could not execute trajectory!");
@@ -192,12 +141,6 @@ int main(int argc, char** argv)
   ROS_INFO("Done!");
   return 0;
 }
-
-
-
-
-
-
 
 descartes_core::TrajectoryPtPtr makeCartesianPoint(const Eigen::Affine3d& pose)
 {
@@ -278,4 +221,53 @@ bool executeTrajectory(const trajectory_msgs::JointTrajectory& trajectory)
     ROS_WARN("Action server could not execute trajectory");
     return false;
   }
+}
+
+void addFreeSpaceSegment(std::vector<geometry_msgs::Pose> waypoints, moveit::planning_interface::MoveGroup& group, robot_trajectory::RobotTrajectory& overall_robot_traj)
+{
+  //MoveIt! planning
+  moveit_msgs::RobotTrajectory moveit_robot_traj;
+  group.setPlanningTime(10.0); 
+  double fraction = group.computeCartesianPath(waypoints,
+                                               0.01,  // eef_step
+                                               0,   // jump_threshold
+                                               moveit_robot_traj); 
+
+  robot_trajectory::RobotTrajectory rt(group.getCurrentState()->getRobotModel(), "manipulator");
+  rt.setRobotTrajectoryMsg(*group.getCurrentState(), moveit_robot_traj);
+  trajectory_processing::IterativeParabolicTimeParameterization iptp;
+  bool success = iptp.computeTimeStamps(rt);
+  ROS_INFO("Computed time stamp %s",success?"SUCCEDED":"FAILED");
+
+  //Appending planned path
+  // if(!overall_robot_traj.waypoints_.empty)
+  overall_robot_traj.append(rt, rt.getWaypointDurationFromStart(rt.getWayPointCount()));
+  ROS_INFO("Appended Free space segment");
+}
+
+void addProcessSegment(TrajectoryVec points, descartes_planner::DensePlanner& planner, moveit::planning_interface::MoveGroup& group, descartes_core::RobotModelPtr model, robot_trajectory::RobotTrajectory& overall_robot_traj, ros::NodeHandle& nh)
+{
+  if (!planner.planPath(points))
+  {
+    ROS_ERROR("Could not solve for a valid path");
+  }
+
+  TrajectoryVec result;
+  if (!planner.getPath(result))
+  {
+    ROS_ERROR("Could not retrieve path");
+  }
+
+  // Translate the result into a type that ROS understands
+  // Get Joint Names
+  std::vector<std::string> names;
+  nh.getParam("controller_joint_names", names);
+  // Generate a ROS joint trajectory with the result path, robot model, given joint names,
+  // a certain time delta between each trajectory point
+  trajectory_msgs::JointTrajectory descartes_joint_solution = toROSJointTrajectory(result, *model, names, 1.0);
+
+  //Append planned path
+  robot_trajectory::RobotTrajectory descartes_robot_traj(group.getCurrentState()->getRobotModel(), "manipulator");
+  descartes_robot_traj.setRobotTrajectoryMsg(*group.getCurrentState(), descartes_joint_solution);
+  overall_robot_traj.append(descartes_robot_traj, descartes_robot_traj.getWaypointDurationFromStart(descartes_robot_traj.getWayPointCount())); 
 }
