@@ -132,10 +132,10 @@ int main(int argc, char** argv)
   addFreeSpaceSegment(waypoints_2, group, overall_robot_traj);
 
   TrajectoryVec points_2;
-  for (unsigned int i = 0; i < 10; ++i)
+  for (unsigned int i = 0; i < 20; ++i)
   {
     Eigen::Affine3d pose;
-    pose = Eigen::Translation3d(0.25 + 0.05*i, -0.75, 0.9);
+    pose = Eigen::Translation3d(0.25, -0.75 + 0.02*i, 0.9 + 0.02*i);
     descartes_core::TrajectoryPtPtr pt = makeTolerancedCartesianPoint(pose);
     points_2.push_back(pt);
   }
