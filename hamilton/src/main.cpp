@@ -6,6 +6,7 @@
 #include <descartes_trajectory/axial_symmetric_pt.h>
 #include <descartes_trajectory/cart_trajectory_pt.h>
 #include <map>
+#include <unordered_map>
 #include <string>
 #include <moveit/move_group_interface/move_group.h>
 #include <moveit/robot_model_loader/robot_model_loader.h>
@@ -246,26 +247,32 @@ bool executeTrajectory(const trajectory_msgs::JointTrajectory& trajectory)
   }
 }
 
-void addFreeSpaceSegmentUnplanned(std::vector<geometry_msgs::Pose> waypoints, std::multimap<std::vector<geometry_msgs::Pose>, std::string> unplanned_trajectory)
+enum TrajectorySegmentType {FREE_MOTION, PROCESS_PATH};
+
+struct TrajectorySegment
 {
-  unplanned_trajectory.insert(std::make_pair(waypoints, "free"));
+  TrajectorySegmentType type;      
+  std::vector<geometry_msgs::Pose> waypoints_geom_msgs;
+};
+               
+bool appendFreeMotionTrajectory(std::vector<geometry_msgs::Pose>& traj, std::vector<TrajectorySegment> unplanned_trajectory)
+{
+  TrajectorySegment current_free_segment;
+  current_free_segment.type = TrajectorySegmentType::FREE_MOTION;
+  current_free_segment.waypoints_geom_msgs = traj;
+  unplanned_trajectory.push_back(current_free_segment);              
 }
 
-void addProcessSegmentUnplanned(std::vector<geometry_msgs::Pose> waypoints, std::multimap<std::vector<geometry_msgs::Pose>, std::string> unplanned_trajectory)
-{
-  unplanned_trajectory.insert(std::pair<std::vector<geometry_msgs::Pose>, std::string> (waypoints, "process"));
-}
-
-void PlanHyrid(std::multimap<std::vector<geometry_msgs::Pose>, std::string> unplanned_trajectory, moveit::planning_interface::MoveGroup& group, robot_trajectory::RobotTrajectory& overall_robot_traj)
+void PlanHyrid(std::vector<TrajectorySegment> unplanned_trajectory, moveit::planning_interface::MoveGroup& group, descartes_planner::DensePlanner& planner, descartes_core::RobotModelPtr model, robot_trajectory::RobotTrajectory& overall_robot_traj, ros::NodeHandle& nh)
 {
   for(auto it = unplanned_trajectory.begin(); it != unplanned_trajectory.end(); it++) 
   {
-    // Free segment Planning
-    if(it->second == "free") 
+    // Free segment planning
+    if(it->type == FREE_MOTION) 
     {       
       moveit_msgs::RobotTrajectory moveit_robot_traj;
       group.setPlanningTime(10.0); 
-      std::vector<geometry_msgs::Pose> current_free_segment = it->first; //the current key of the std::multimap, which is geometry_msgs::Pose object
+      std::vector<geometry_msgs::Pose> current_free_segment = it->waypoints_geom_msgs; //the current key of the std::multimap, which is geometry_msgs::Pose object
       double fraction = group.computeCartesianPath(current_free_segment,
                                                  0.01,  // eef_step
                                                  0,   // jump_threshold
@@ -284,16 +291,16 @@ void PlanHyrid(std::multimap<std::vector<geometry_msgs::Pose>, std::string> unpl
     }   
 
     // Process segment planning
-    if(it->second == "process")
+    if(it->type == PROCESS_PATH)
     {
       // Container for the current segment
       TrajectoryVec points; 
      
       // Convert from geometry_msgs::Pose to Descartes point type
-      for(auto segment_iterator = it->first.begin(); segment_iterator!= it->first.end(); segment_iterator++)
+      for(auto segment_iterator = it->waypoints_geom_msgs.begin(); segment_iterator!= it->waypoints_geom_msgs.end(); segment_iterator++)
       {
         Eigen::Affine3d pose;
-        pose = Eigen::Translation3d(segment_iterator.position.x, segment_iterator.position.y, segment_iterator.position.z); //CHECK with same z(0)=1.4 and z(0)=1.4-0.05
+        pose = Eigen::Translation3d((*segment_iterator).position.x, (*segment_iterator).position.y, (*segment_iterator).position.z); 
         descartes_core::TrajectoryPtPtr pt = makeTolerancedCartesianPoint(pose);
         points.push_back(pt);
       }
@@ -301,24 +308,24 @@ void PlanHyrid(std::multimap<std::vector<geometry_msgs::Pose>, std::string> unpl
       // Append the first point of the next segment (if the current segment is not the last segment itself) 
       if(it != unplanned_trajectory.end())
       {
-        std::vector<geometry_msgs::Pose> next_segment = it++;
-        geometry_msgs::Pose first_point_of_next_segment = next_segment.begin();
+        it++;
+        auto first_point_of_next_segment = it->waypoints_geom_msgs.begin();
         Eigen::Affine3d first_point_of_next_segment_eigen;
-        first_point_of_next_segment_eigen = Eigen::Translation3d(first_point_of_next_segment.position.x, first_point_of_next_segment.position.y, first_point_of_next_segment.position.z);
+        first_point_of_next_segment_eigen = Eigen::Translation3d(first_point_of_next_segment->position.x, first_point_of_next_segment->position.y, first_point_of_next_segment->position.z);
         descartes_core::TrajectoryPtPtr first_point_of_next_segment_descartes = makeTolerancedCartesianPoint(first_point_of_next_segment_eigen);
         points.push_back(first_point_of_next_segment_descartes);
         it--; //let the hybrid iterator come back to the current segment
       }
 
       // Prepend the first point of the next segment (if the current segment is not the first segment itself) 
-      if(it != it->unplanned_trajectory.begin())
+      if(it != unplanned_trajectory.begin())
       { 
-        std::vector<geometry_msgs::Pose> previous_segment = it--;
-        geometry_msgs::Pose last_point_of_the_previous_segment = previous_segment.begin();
+        it--;
+        auto last_point_of_previous_segment = it->waypoints_geom_msgs.begin();
         Eigen::Affine3d last_point_of_previous_segment_eigen;
-        last_point_of_previous_segment_eigen = Eigen::Translation3d(last_point_of_previous_segment.position.x, last_point_of_previous_segment.position.y, last_point_of_previous_segment.position.z);
+        last_point_of_previous_segment_eigen = Eigen::Translation3d(last_point_of_previous_segment->position.x, last_point_of_previous_segment->position.y, last_point_of_previous_segment->position.z);
         descartes_core::TrajectoryPtPtr last_point_of_previous_segment_descartes = makeTolerancedCartesianPoint(last_point_of_previous_segment_eigen);
-        points.insert(points.begin(), last_point_of_previous_segment_descartes)
+        points.insert(points.begin(), last_point_of_previous_segment_descartes);
         it++; //let the hybrid iterator come back to the current segment
       }
 
@@ -350,64 +357,3 @@ void PlanHyrid(std::multimap<std::vector<geometry_msgs::Pose>, std::string> unpl
   }
 }
 
-/*void addFreeSpaceSegment(std::vector<geometry_msgs::Pose> waypoints, moveit::planning_interface::MoveGroup& group, robot_trajectory::RobotTrajectory& overall_robot_traj)
-{
-  //MoveIt! planning
-  moveit_msgs::RobotTrajectory moveit_robot_traj;
-  group.setPlanningTime(10.0); 
-  double fraction = group.computeCartesianPath(waypoints,
-                                               0.01,  // eef_step
-                                               0,   // jump_threshold
-                                               moveit_robot_traj); 
-
-  robot_trajectory::RobotTrajectory rt(group.getCurrentState()->getRobotModel(), "manipulator");
-  rt.setRobotTrajectoryMsg(*group.getCurrentState(), moveit_robot_traj);
-  trajectory_processing::IterativeParabolicTimeParameterization iptp;
-  bool success = iptp.computeTimeStamps(rt);
-  ROS_INFO("Computed time stamp %s",success?"SUCCEDED":"FAILED");
-
-  //Appending planned path
-  // if(!overall_robot_traj.waypoints_.empty)
-  overall_robot_traj.append(rt, rt.getWaypointDurationFromStart(rt.getWayPointCount()));
-  ROS_INFO("Appended Free space segment");
-}*/
-
-/*
-void addProcessSegment(TrajectoryVec points, descartes_planner::DensePlanner& planner, moveit::planning_interface::MoveGroup& group, descartes_core::RobotModelPtr model, robot_trajectory::RobotTrajectory& overall_robot_traj, ros::NodeHandle& nh)
-{
-  using namespace descartes_core;
-  using namespace descartes_trajectory; 
-
-  //This can't be used are we are not executing before planning. 
-  std::vector<double> joint_values = group.getCurrentJointValues();
-  descartes_core::TimingConstraint timing_constraint = TimingConstraint(0); 
-  TrajectoryPtPtr first_point = TrajectoryPtPtr(new JointTrajectoryPt(joint_values, timing_constraint)); //TODO TOFIX? timing_constraint is mandatory in constructor. Shouldn't be. 
-  points.insert(points.begin(), first_point);
-  //Could interpolate in cart space using this
-  // robot_state::RobotState last_robot_state = overall_robot_traj.getLastWayPoint()
-
-  if (!planner.planPath(points))
-  {
-    ROS_ERROR("Could not solve for a valid path");
-  }
-
-  TrajectoryVec result;
-  if (!planner.getPath(result))
-  {
-    ROS_ERROR("Could not retrieve path");
-  }
-
-  // Get Joint Names
-  std::vector<std::string> names;
-  nh.getParam("controller_joint_names", names);
-  // Generate a ROS joint trajectory with the result path, robot model, given joint names,
-  // a certain time delta between each trajectory point
-  trajectory_msgs::JointTrajectory descartes_joint_solution = toROSJointTrajectory(result, *model, names, 1.0);
-
-  //Append planned path
-  robot_trajectory::RobotTrajectory descartes_robot_traj(group.getCurrentState()->getRobotModel(), "manipulator"); //TODO group.getRobotModel does the same thing. 
-  descartes_robot_traj.setRobotTrajectoryMsg(*group.getCurrentState(), descartes_joint_solution);
-  overall_robot_traj.append(descartes_robot_traj, descartes_robot_traj.getWaypointDurationFromStart(descartes_robot_traj.getWayPointCount())); 
-  ROS_INFO("Appended process segment");
-}
-*/
