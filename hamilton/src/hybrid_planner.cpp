@@ -127,6 +127,44 @@ namespace Hamilton
           std::advance(it, 1); //let the hybrid iterator come back to the current segment
         }
 
+        /* ===== The better solution ===== */ 
+
+        // Prepend the last point of the previous _planned_ segment, i.e. joint vals of the last point of the previous segment is the seed for the current process segment   
+        // std::vector<double> joint_values = moveit_group_.getCurrentJointValues(); //this won't work always (does it depend if the previous segment was free/descrtes?)
+        // what I mean to ask is that both moveit_group_, and descartes_model_ get updated? 
+        // Best is to just extract from the overall_robot_traj_
+        if(it != unplanned_trajectory_.begin())
+        {
+          // Get Joint Names. 
+          // Joint names could/should be member variables of HybridPlanner class
+          std::vector<std::string> names;
+          node_handle_.getParam("controller_joint_names", names); 
+          // Get joint valur of the last waypoint in the overall_robot_traj_
+          std::vector<double> joint_values = overall_robot_traj_->getLastWayPointPtr->getJointPositions(names);        
+          descartes_core::TimingConstraint timing_constraint = TimingConstraint(0); //TODO is this correct?
+          TrajectoryPtPtr first_point = TrajectoryPtPtr(new JointTrajectoryPt(joint_values, timing_constraint)); //TODO TOFIX? timing_constraint is mandatory in constructor. Shouldn't be. 
+          process_segment_descartes.insert(process_segment_descartes.begin(), first_point);
+        }
+
+        // getClosestJointPose to the first pose of the next segment in unplanned_trajectory_
+        // We'd like the process path to end close to the beginning of the following (free motion) segment, we'd call getClosestJointPose method with the start joint point
+        // of the free motion as the seed argument to this method. Thus, this operation should return a valid joint pose for the under-constrained cartesian point.
+
+        // TO DO:
+        if(it != unplanned_trajectory_.end())
+        {
+          std::advance(it, 1);
+          auto first_point_of_next_segment = it->waypoints_geom_msgs_.begin();
+          Eigen::Affine3d first_point_of_next_segment_eigen;
+          first_point_of_next_segment_eigen = Eigen::Translation3d(first_point_of_next_segment->position.x, first_point_of_next_segment->position.y, first_point_of_next_segment->position.z);
+          descartes_core::TrajectoryPtPtr first_point_of_next_segment_descartes = makeTolerancedCartesianPoint(first_point_of_next_segment_eigen);
+          getClosestJointPose
+          process_segment_descartes.push_back(first_point_of_next_segment_descartes);
+          std::advance(it, -1); //let the hybrid iterator come back to the current segment
+        }
+
+        /* ===== The better solution ===== */ 
+
         // Container for planned process-path(descartes type) trajectory segment 
         TrajectoryVec result;
         
