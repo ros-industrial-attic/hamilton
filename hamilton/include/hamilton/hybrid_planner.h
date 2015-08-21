@@ -32,19 +32,19 @@ namespace Hamilton
 
   struct HybridConfiguration
   {
-    const std::string ROBOT_DESCRIPTION; // = "robot_description";         /* Name of description on parameter server. Typically just "robot_description". */
-    const std::string GROUP_NAME;        // = "manipulator";               /* Name of the manipulation group containing the relevant links in the robot, which is what you define when running MoveitSetupAssistant */
-    const std::string TCP_FRAME;         // = "tool0";                     /* Tool center point frame (name of link associated with tool. Usually the last link in the kinematic chain of the robot */
-    const std::string BASE_LINK;          //                                /* The name of the base link of the robot */
-    const std::string WORLD_FRAME;       // = "base_link";                 /* The name of the world link in the URDF file, the frame in which you are expressing poses. */
-                                         // = "world_frame"                /* Typically "world_frame" or "base_link". */
-    const std::vector<std::string> JOINT_NAMES;                            /* A list with the names of the mobile joints in the robot */ 
-                                                                           // 2nd param of toROSJointTrajectory()
+    std::string group_name;        // = "manipulator";               /* Name of the manipulation group containing the relevant links in the robot, which is what you define when running MoveitSetupAssistant */
+    std::string robot_description; // = "robot_description";         /* Name of description on parameter server. Typically just "robot_description". */
+    std::string tcp_frame;         // = "tool0";                     /* Tool center point frame (name of link associated with tool. Usually the last link in the kinematic chain of the robot */
+    std::string base_link;         //                                /* The name of the base link of the robot */
+    std::string world_frame;       // = "base_link" OR "world_frame";/* The name of the world link in the URDF file, the frame in which you are expressing poses. */
+                                                                     /* Typically "world_frame" or "base_link". */
+    std::vector<std::string> joint_names;                            /* A list with the names of the mobile joints in the robot */ 
+                                                                     // 2nd param of toROSJointTrajectory()
     // MoveIt! params
-    const double PLAN_TIME;   // = 10.0;                      
-    const double STEP_SIZE;  // = 0.01; 
-    const double JUMP_THRESH; // =0;
-    bool moveit_replan_;
+    double plan_time;   // = 10.0;                      
+    double step_size;  // = 0.01; 
+    double jump_thresh; // =0;
+    bool moveit_replan;
     bool avoid_collision_;
     std::string moveit_planner_type_;
     
@@ -79,7 +79,7 @@ namespace Hamilton
 
     protected:
       // Append unplanned free space/process path segments defined by "waypoints' to unplanned_trajectory_ as a TrajectorySegment object. 
-      // TODO extend to other types - joints, descartes types, etc
+      // TODO extend to other types - joints, descartes types, etc.
     	void appendFreeMotionTrajectorySegment(std::vector<geometry_msgs::Pose>& waypoints);
     	void appendProcessPathTrajectorySegment(std::vector<geometry_msgs::Pose>& waypoints);
 

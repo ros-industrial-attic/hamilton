@@ -8,16 +8,41 @@ namespace Hamilton
   }
 
   void HybridPlanner::init()
-  {    
+  { 
+    // Load parmas from YAML file into HybridPlanner::HybridConfiguration config_ 
+    if(node_handle_.getParam("group_name",config_.group_name) &&
+    node_handle_.getParam("robot_description",config_.robot_description) &&
+    node_handle_.getParam("tcp_frame",config_.tcp_frame) &&
+    node_handle_.getParam("base_link",config_.base_link) &&
+    node_handle_.getParam("world_frame",config_.world_frame) &&
+    node_handle_.getParam("controller_joint_names",config_.joint_names) &&
+    node_handle_.getParam("moveit_params/plan_time", config_.plan_time) &&
+    node_handle_.getParam("moveit_params/step_size", config_.step_size) &&
+    node_handle_.getParam("moveit_params/jump_thresh", config_.jump_thresh) &&
+    node_handle_.getParam("moveit_params/replan", config_.moveit_replan) &&
+    node_handle_.getParam("moveit_params/avoid_collision", config_.avoid_collision) &&
+    node_handle_.getParam("moveit_params/moveit_planner_type",config_.moveit_planner_type_) &&
+    node_handle_.getParam("descartes_params/descartes_planner_type",config_.descartes_planner_type_) &&
+    node_handle_.getParam("trajectory/time_delay",config_.time_delay) &&
+    node_handle_.getParam("trajectory/time_offset",config_.time_offset))
+    {
+      ROS_INFO_STREAM("Loaded parameters");
+    }
+    else
+    {
+      ROS_ERROR_STREAM("Failed to load application parameters");
+      exit(-1); //TO CHECK
+    }
+
     // Set the group name of HybridPlanner's MoveIt! group member in accordance to its config_ struct
-    moveit_group_.Options.group_name_ = config_.GROUP_NAME;
+    moveit_group_.Options.group_name_ = config_.group_name;
 
     // Move to home
     moveit_group_.setNamedTarget("home");
     moveit_group_.move();
     
-    // Initialize a Descartes robot model, MoveIt group is already initialized to config_.GROUP_NAME in HybridPlanner class // TOCHECK here v/s in class definition itself
-    if (!descartes_model_->initialize(config_.ROBOT_DESCRIPTION, config_.GROUP_NAME, config_.WORLD_FRAME, config_.TCP_FRAME))
+    // Initialize a Descartes robot model, MoveIt group is already initialized to config_.group_name in HybridPlanner class // TOCHECK here v/s in class definition itself
+    if (!descartes_model_->initialize(config_.robot_description, config_.group_name, config_.world_frame, config_.tcp_frame))
     {
       ROS_WARN("Could not initialize Descartes robot model");
     }
@@ -39,9 +64,9 @@ namespace Hamilton
     }
 
     // The overall_robot_traj_ is the final, hybrid trajectory that is meant to be executed.  
-    overall_robot_traj_.setGroupName(config_.GROUP_NAME); 
+    overall_robot_traj_.setGroupName(config_.group_name); 
     //TODO How to implement the OOP equivalent of following line?
-    // overall_robot_traj_(moveit_group_.getCurrentState()->getRobotModel(), config_.GROUP_NAME); //TODO group.getRobotModel
+    // overall_robot_traj_(moveit_group_.getCurrentState()->getRobotModel(), config_.group_name); //TODO group.getRobotModel
   }
 
   void HybridPlanner::appendFreeMotionTrajectorySegment(std::vector<geometry_msgs::Pose>& waypoints)
@@ -73,7 +98,7 @@ namespace Hamilton
         double fraction = moveit_group_.computeCartesianPath(current_free_segment, config_.STEP_SIZE, config_.JUMP_THRESH, planned_moveit_robot_traj_segment); //TODO fraction isn't used
 
         // convert from moveit_msgs::RobotTrajectory to robot_trajectory::RobotTrajectory
-        robot_trajectory::RobotTrajectory planned_robot_traj_segment(moveit_group_.getCurrentState()->getRobotModel(), config_.GROUP_NAME);
+        robot_trajectory::RobotTrajectory planned_robot_traj_segment(moveit_group_.getCurrentState()->getRobotModel(), config_.group_name);
         planned_robot_traj_segment.setRobotTrajectoryMsg(*moveit_group_.getCurrentState(), planned_moveit_robot_traj_segment);
         trajectory_processing::IterativeParabolicTimeParameterization iptp;
         bool success = iptp.computeTimeStamps(planned_robot_traj_segment);
@@ -204,7 +229,7 @@ namespace Hamilton
         trajectory_msgs::JointTrajectory descartes_joint_solution = toROSJointTrajectory(result, names, 1.0);
 
         //Append planned path
-        robot_trajectory::RobotTrajectory descartes_robot_traj(moveit_group_.getCurrentState()->getRobotModel(), config_.GROUP_NAME); //TODO moveit_group_.getRobotModel does the same thing. 
+        robot_trajectory::RobotTrajectory descartes_robot_traj(moveit_group_.getCurrentState()->getRobotModel(), config_.group_name); //TODO moveit_group_.getRobotModel does the same thing. 
         descartes_robot_traj.setRobotTrajectoryMsg(*moveit_group_.getCurrentState(), descartes_joint_solution);
         overall_robot_traj_.append(descartes_robot_traj, descartes_robot_traj.getWaypointDurationFromStart(descartes_robot_traj.getWayPointCount())); 
         ROS_INFO("Appended process segment");
