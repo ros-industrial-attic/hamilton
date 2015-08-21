@@ -24,7 +24,6 @@ namespace Hamilton
   /* ===== utilities ===== */
   typedef std::vector<descartes_core::TrajectoryPtPtr> TrajectoryVec;
   typedef TrajectoryVec::const_iterator TrajectoryIter; //TODO redundant use auto. 
-  enum descartes_planner_type {DENSE, SPARSE};
   enum TrajectorySegmentType {FREE_MOTION, PROCESS_PATH, FREE_MOTION_START_END_ONLY};
   
   /*  =============================== Hybrid Configuration Struct ===============================
@@ -45,11 +44,11 @@ namespace Hamilton
     double step_size;  // = 0.01; 
     double jump_thresh; // =0;
     bool moveit_replan;
-    bool avoid_collision_;
-    std::string moveit_planner_type_;
+    bool avoid_collision;
+    std::string moveit_planner_type;
     
     // Descartes params
-    descartes_planner_type descartes_planner_type_;
+    std::string descartes_planner_type;
     double time_delay; // = 1.0; Last param of toROSJointTrajectory() 
     double time_offset; // = 0.0; Used inside toROSJointTrajectory()
   };
