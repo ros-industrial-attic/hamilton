@@ -7,7 +7,7 @@ namespace Hamilton
     //)WHAT)TODO. Reset Descartes robot model ptr? What about MoveIt? 
   }
 
-  void HybridPlanner::init()
+  bool HybridPlanner::init()
   { 
     // Load params from YAML file into HybridPlanner::HybridConfiguration config_ 
     if(node_handle_.getParam("group_name",config_.group_name) &&
@@ -27,70 +27,72 @@ namespace Hamilton
     node_handle_.getParam("trajectory/time_offset",config_.time_offset))
     {
       ROS_INFO_STREAM("Loaded parameters");
-    }
-    else
+    } else
     {
       ROS_ERROR_STREAM("Failed to load application parameters");
-      exit(-1); //TO CHECK
+      return 0; 
     }
 
     // Set the group name of HybridPlanner's MoveIt! group member in accordance to its config_ struct
-    moveit::planning_interface::MoveGroup local_group(config_.robot_description);
+    moveit::planning_interface::MoveGroup local_group(config_.robot_description); // TOCHECK Publish error/warn if config_.robot_description isn't present, and use "robot_description" as default 
     moveit_group_ = local_group;
     
     // Initialize a Descartes robot model, MoveIt group is already initialized to config_.group_name in HybridPlanner class // TOCHECK here v/s in class definition itself
     if (!descartes_model_->initialize(config_.robot_description, config_.group_name, config_.world_frame, config_.tcp_frame))
     {
-      ROS_WARN("Could not initialize Descartes robot model");
+      ROS_ERROR_STREAM("Could not initialize Descartes robot model");
+      return 0;
     }
 
     // Initialize a Descartes planner with the Descartes Model 
-    if(config_.descartes_planner_type == "dense")
+    if(config_.descartes_planner_type == DENSE)
     {
       descartes_planner_dense_.initialize(descartes_model_);
       ROS_INFO("Initialized Descartes dense planner");
-    }
-    else if(config_.descartes_planner_type == "sparse")
+    } else if(config_.descartes_planner_type == SPARSE)
     {
       descartes_planner_sparse_.initialize(descartes_model_);
       ROS_INFO("Initialized Descartes sparse planner");
-    }
-    else
+    } else
     {
-      ROS_WARN("Descartes planner not initialized. Errors will occur if process path segments are being planned for");
+      descartes_planner_dense_.initialize(descartes_model_);
+      ROS_WARN("descartes_params/descartes_planner_type parameter not found. Using the Dense Planner by default");
     }
 
     // The overall_robot_traj_ is the final, hybrid trajectory that is meant to be executed.  
     robot_trajectory::RobotTrajectory local_overall_robot_traj(local_group.getCurrentState()->getRobotModel(), config_.robot_description); //TODO group.getRobotModel
     overall_robot_traj_ = local_overall_robot_traj;  
+    return 1;
   }
 
-  void HybridPlanner::appendFreeMotionTrajectorySegment(std::vector<geometry_msgs::Pose>& waypoints)
+  bool HybridPlanner::appendFreeMotionTrajectorySegment(std::vector<geometry_msgs::Pose>& waypoints)
   {
     TrajectorySegment current_free_segment;
-    current_free_segment.type_ = FREE_MOTION;
-    current_free_segment.waypoints_geom_msgs_ = waypoints;
-    unplanned_trajectory_.push_back(current_free_segment);      
+    current_free_segment.type = FREE_MOTION;
+    current_free_segment.waypoints_geom_msgs = waypoints;
+    unplanned_trajectory_.push_back(current_free_segment); 
+    return 1; //TODO add checks     
   }
 
-  void HybridPlanner::appendProcessPathTrajectorySegment(std::vector<geometry_msgs::Pose>& waypoints)
+  bool HybridPlanner::appendProcessPathTrajectorySegment(std::vector<geometry_msgs::Pose>& waypoints)
   {
     TrajectorySegment current_process_segment;
-    current_process_segment.type_ = PROCESS_PATH;
-    current_process_segment.waypoints_geom_msgs_ = waypoints;
-    unplanned_trajectory_.push_back(current_process_segment);              
+    current_process_segment.type = PROCESS_PATH;
+    current_process_segment.waypoints_geom_msgs = waypoints;
+    unplanned_trajectory_.push_back(current_process_segment);
+    return 1; //TODO add checks              
   }
 
-  void HybridPlanner::PlanHybrid()
+  void HybridPlanner::planHybrid()
   {
     for(auto it = unplanned_trajectory_.begin(); it != unplanned_trajectory_.end(); it++) 
     {
       // Free segment planning
-      if(it->type_ == FREE_MOTION) 
+      if(it->type == FREE_MOTION) 
       {       
         moveit_msgs::RobotTrajectory planned_moveit_robot_traj_segment; // container for the planned MoveIt! trajectory
         moveit_group_.setPlanningTime(config_.plan_time); 
-        std::vector<geometry_msgs::Pose> current_free_segment = it->waypoints_geom_msgs_; 
+        std::vector<geometry_msgs::Pose> current_free_segment = it->waypoints_geom_msgs; 
         double fraction = moveit_group_.computeCartesianPath(current_free_segment, config_.step_size, config_.jump_thresh, planned_moveit_robot_traj_segment); //TODO fraction isn't used
 
         // convert from moveit_msgs::RobotTrajectory to robot_trajectory::RobotTrajectory
@@ -106,7 +108,7 @@ namespace Hamilton
       }   
 
       // Process segment planning
-      if(it->type_ == PROCESS_PATH)
+      if(it->type == PROCESS_PATH)
       {
         using namespace descartes_core;
         using namespace descartes_trajectory; 
@@ -115,7 +117,7 @@ namespace Hamilton
         TrajectoryVec process_segment_descartes; 
        
         // Convert from geometry_msgs::Pose to Descartes point type
-        for(auto segment_iterator = it->waypoints_geom_msgs_.begin(); segment_iterator!= it->waypoints_geom_msgs_.end(); segment_iterator++)
+        for(auto segment_iterator = it->waypoints_geom_msgs.begin(); segment_iterator!= it->waypoints_geom_msgs.end(); segment_iterator++)
         {
           Eigen::Affine3d pose;
           pose = Eigen::Translation3d(segment_iterator->position.x, segment_iterator->position.y, segment_iterator->position.z); 
@@ -128,7 +130,7 @@ namespace Hamilton
         if(it != unplanned_trajectory_.end())
         {
           std::advance(it, 1);
-          auto first_point_of_next_segment = it->waypoints_geom_msgs_.begin();
+          auto first_point_of_next_segment = it->waypoints_geom_msgs.begin();
           Eigen::Affine3d first_point_of_next_segment_eigen;
           first_point_of_next_segment_eigen = Eigen::Translation3d(first_point_of_next_segment->position.x, first_point_of_next_segment->position.y, first_point_of_next_segment->position.z);
           descartes_core::TrajectoryPtPtr first_point_of_next_segment_descartes = makeTolerancedCartesianPoint(first_point_of_next_segment_eigen);
@@ -140,7 +142,7 @@ namespace Hamilton
         if(it != unplanned_trajectory_.begin())
         { 
           std::advance(it, -1);
-          auto last_point_of_previous_segment = it->waypoints_geom_msgs_.begin();
+          auto last_point_of_previous_segment = it->waypoints_geom_msgs.begin();
           Eigen::Affine3d last_point_of_previous_segment_eigen;
           last_point_of_previous_segment_eigen = Eigen::Translation3d(last_point_of_previous_segment->position.x, last_point_of_previous_segment->position.y, last_point_of_previous_segment->position.z);
           descartes_core::TrajectoryPtPtr last_point_of_previous_segment_descartes = makeTolerancedCartesianPoint(last_point_of_previous_segment_eigen);
@@ -162,8 +164,7 @@ namespace Hamilton
           node_handle_.getParam("controller_joint_names", names); 
           // Get joint valur of the last waypoint in the overall_robot_traj_
           std::vector<double> joint_values = overall_robot_traj_->getLastWayPointPtr->getJointPositions(names);        
-          descartes_core::TimingConstraint timing_constraint = TimingConstraint(0); //TODO is this correct?
-          TrajectoryPtPtr first_point = TrajectoryPtPtr(new JointTrajectoryPt(joint_values, timing_constraint)); //TODO TOFIX? timing_constraint is mandatory in constructor. Shouldn't be. 
+          TrajectoryPtPtr first_point = TrajectoryPtPtr(new JointTrajectoryPt(joint_values)); 
           process_segment_descartes.insert(process_segment_descartes.begin(), first_point);
         }*/
 
@@ -172,10 +173,10 @@ namespace Hamilton
         // of the free motion as the seed argument to this method. Thus, this operation should return a valid joint pose for the under-constrained cartesian point.
 
         // TODO; not implemented
-       /* if(it != unplanned_trajectory_.end())
+        /* if(it != unplanned_trajectory_.end())
         {
           std::advance(it, 1);
-          auto first_point_of_next_segment = it->waypoints_geom_msgs_.begin();
+          auto first_point_of_next_segment = it->waypoints_geom_msgs.begin();
           Eigen::Affine3d first_point_of_next_segment_eigen;
           first_point_of_next_segment_eigen = Eigen::Translation3d(first_point_of_next_segment->position.x, first_point_of_next_segment->position.y, first_point_of_next_segment->position.z);
           descartes_core::TrajectoryPtPtr first_point_of_next_segment_descartes = makeTolerancedCartesianPoint(first_point_of_next_segment_eigen);
@@ -183,14 +184,14 @@ namespace Hamilton
           process_segment_descartes.push_back(first_point_of_next_segment_descartes);
           std::advance(it, -1); //let the hybrid iterator come back to the current segment
         }
-*/
+        */
         /* ===== The better solution ===== */ 
 
         // Container for planned process-path(descartes type) trajectory segment 
         TrajectoryVec result;
         
         // Call the Descartes planner to do some planning
-        if(config_.descartes_planner_type == "dense")
+        if(config_.descartes_planner_type == DENSE)
         {
           if (!descartes_planner_dense_.planPath(process_segment_descartes))
           {
@@ -203,7 +204,7 @@ namespace Hamilton
           }  
         }   
 
-        if(config_.descartes_planner_type == "sparse")
+        if(config_.descartes_planner_type == SPARSE)
         {
           if (!descartes_planner_sparse_.planPath(process_segment_descartes))
           {
@@ -216,13 +217,8 @@ namespace Hamilton
           }  
         }
 
-        // Get Joint Names. 
-        // Joint names could/should be member variables of HybridPlanner class
-        std::vector<std::string> names;
-        node_handle_.getParam("controller_joint_names", names); 
-
         // Generate a ROS joint trajectory with the result path, robot model, given joint names with a certain time delta between each trajectory point
-        trajectory_msgs::JointTrajectory descartes_joint_solution = toROSJointTrajectory(result, names, 1.0);
+        trajectory_msgs::JointTrajectory descartes_joint_solution = toROSJointTrajectory(result);
 
         //Append planned path
         robot_trajectory::RobotTrajectory descartes_robot_traj(moveit_group_.getCurrentState()->getRobotModel(), config_.group_name); //TODO moveit_group_.getRobotModel does the same thing. 
@@ -233,17 +229,16 @@ namespace Hamilton
     }
   }
 
-  // TODO joint_names and time_delay should be descartes config params 
-  trajectory_msgs::JointTrajectory HybridPlanner::toROSJointTrajectory(const TrajectoryVec& trajectory, const std::vector<std::string>& joint_names, double time_delay)
+  trajectory_msgs::JointTrajectory HybridPlanner::toROSJointTrajectory(const TrajectoryVec& trajectory)
   {
     // Fill out information about our trajectory
     trajectory_msgs::JointTrajectory result;
     result.header.stamp = ros::Time::now(); //TODO this should be got from node_handle_?
-    result.header.frame_id = "world_frame"; //TODO config param?
-    result.joint_names = joint_names;       //TODO config param?   
+    result.header.frame_id = config_.world_frame; 
+    result.joint_names = config_.joint_names;     
 
     // For keeping track of time-so-far in the trajectory
-    double time_offset = 0.0;               //TODO config param?
+    double local_time_offset = config_.time_offset;
 
     // Loop through the trajectory
     for (TrajectoryIter it = trajectory.begin(); it != trajectory.end(); it++)
@@ -261,10 +256,10 @@ namespace Hamilton
       pt.accelerations.resize(joints.size(), 0.0);
       pt.effort.resize(joints.size(), 0.0);
       // set the time into the trajectory
-      pt.time_from_start = ros::Duration(time_offset);
+      pt.time_from_start = ros::Duration(local_time_offset);
       // increment time
-      time_offset += time_delay;
-
+      local_time_offset += config_.time_delay;
+      // append to the resultant trajectory_msgs::JointTrajectory message
       result.points.push_back(pt);
     }
     return result;
@@ -272,11 +267,11 @@ namespace Hamilton
 
   descartes_core::TrajectoryPtPtr HybridPlanner::makeCartesianPoint(const Eigen::Affine3d& pose)
   {
-    return TrajectoryPtPtr( new CartTrajectoryPt( TolerancedFrame(pose)) );
+    return TrajectoryPtPtr(new CartTrajectoryPt( TolerancedFrame(pose)));
   }
 
   descartes_core::TrajectoryPtPtr HybridPlanner::makeTolerancedCartesianPoint(const Eigen::Affine3d& pose)
   {
-    return TrajectoryPtPtr( new AxialSymmetricPt(pose, M_PI/2.0-0.0001, AxialSymmetricPt::Z_AXIS) );
+    return TrajectoryPtPtr(new AxialSymmetricPt(pose, M_PI/2.0 - CONST_TOLERANCED_CP_1, AxialSymmetricPt::Z_AXIS));
   }
 }
