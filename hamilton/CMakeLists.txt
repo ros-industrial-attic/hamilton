@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(hamilton)
 
+## Find catkin macros and libraries
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
@@ -10,13 +11,17 @@ find_package(catkin REQUIRED COMPONENTS
   descartes_planner
   moveit_msgs
   moveit_ros_planning_interface
-  trajectory_msgs	
+  trajectory_msgs 
 )
 
 find_package(Boost REQUIRED)
 find_package(Eigen REQUIRED)
 
 catkin_package()
+
+###########
+## Build ##
+###########
 
 include_directories(
   include 
@@ -25,7 +30,8 @@ include_directories(
   ${Eigen_INCLUDE_DIRS}
 )
 
-add_executable(${PROJECT_NAME}_demo src/main.cpp)
+add_library(${PROJECT_NAME} src/hybrid_planner.cpp)
+
+add_executable(${PROJECT_NAME}_demo src/hybrid_planner.cpp)
 
 target_link_libraries(${PROJECT_NAME}_demo ${catkin_LIBRARIES})
-
